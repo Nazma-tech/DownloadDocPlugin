@@ -1,0 +1,145 @@
+package com.ibm.jspl;
+
+import com.filenet.api.core.Connection;
+import com.filenet.api.core.Document;
+import com.filenet.api.core.Domain;
+import com.filenet.api.core.Factory;
+import com.filenet.api.core.ObjectStore;
+import com.filenet.api.exception.EngineRuntimeException;
+import com.filenet.api.query.SearchSQL;
+import com.filenet.api.query.SearchScope;
+import com.filenet.api.util.UserContext;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import javax.security.auth.Subject;
+
+public class JSPLDocsDownload {
+  private static UserContext uc;
+  
+  private static Domain domain;
+  
+  private static ObjectStore os;
+  
+  public Connection getConnection() {
+    Connection connection = null;
+    try {
+      String uri = "http://172.17.100.62:9080/wsi/FNCEWS40MTOM/";
+      String username = "p8padmin";
+      String password = "J$pl@fi#56";
+      String stanza = "FileNetP8WSI";
+      connection = Factory.Connection.getConnection(uri);
+      Subject sub = UserContext.createSubject(connection, username, password, stanza);
+      uc = UserContext.get();
+      uc.pushSubject(sub);
+      System.out.println("Connection established successfully.");
+      domain = Factory.Domain.fetchInstance(connection, null, null);
+      System.out.println("Domain: " + domain.get_Name());
+      String objectStoreName = "JSPLIP";
+      os = Factory.ObjectStore.fetchInstance(domain, objectStoreName, null);
+      System.out.println("Object Store: " + os.get_Name());
+    } catch (Exception e) {
+      System.out.println("Error establishing connection: " + e.getMessage());
+      e.printStackTrace();
+    } 
+    return connection;
+  }
+  
+  public List<String> readUniqueIDsFromCSV(String csvFilePath) {
+    List<String> uniqueIds = new ArrayList<>();
+    try {
+      Exception exception2, exception1 = null;
+    } catch (Exception e) {
+      System.out.println("Error reading CSV file: " + e.getMessage());
+      e.printStackTrace();
+    } 
+    return uniqueIds;
+  }
+  
+  public void downloadDocuments(List<String> uniqueIds, String downloadPath) {
+    int count = 0;
+    Map<String, Integer> idOccurrences = new HashMap<>();
+    for (String uniqueId : uniqueIds) {
+      try {
+        idOccurrences.put(uniqueId, Integer.valueOf(((Integer)idOccurrences.getOrDefault(uniqueId, Integer.valueOf(0))).intValue() + 1));
+        String query = "SELECT [This], [UniqueID], [FIDocumentNumber], [ContentElements] FROM [NONPO] WHERE [UniqueID] = '" + uniqueId + "' OPTIONS(TIMELIMIT 180)";
+        SearchSQL searchSQL = new SearchSQL(query);
+        SearchScope searchScope = new SearchScope(os);
+        Iterator<Document> results = searchScope.fetchObjects(searchSQL, null, null, Boolean.valueOf(false)).iterator();
+        if (!results.hasNext()) {
+          System.out.println("No document found for Unique ID: " + uniqueId);
+          continue;
+        } 
+        Document document = results.next();
+        String docName = document.getProperties().getStringValue("FIDocumentNumber");
+        if (docName == null || docName.isEmpty())
+          docName = uniqueId; 
+        int occurrence = ((Integer)idOccurrences.get(uniqueId)).intValue();
+        if (occurrence > 1) {
+          System.out.println("Duplicate Unique ID found: " + uniqueId + ". Saving with index.");
+          docName = String.valueOf(docName) + "(" + occurrence + ")";
+        } 
+        InputStream contentStream = null;
+        try {
+          contentStream = document.accessContentStream(0);
+          File file = new File(String.valueOf(downloadPath) + File.separator + docName + ".pdf");
+          Exception exception1 = null, exception2 = null;
+          try {
+            FileOutputStream fos = new FileOutputStream(file);
+            try {
+              byte[] buffer = new byte[1024];
+              int bytesRead;
+              while ((bytesRead = contentStream.read(buffer)) != -1)
+                fos.write(buffer, 0, bytesRead); 
+            } finally {
+              if (fos != null)
+                fos.close(); 
+            } 
+          } finally {
+            exception2 = null;
+            if (exception1 == null) {
+              exception1 = exception2;
+            } else if (exception1 != exception2) {
+              exception1.addSuppressed(exception2);
+            } 
+          } 
+        } catch (EngineRuntimeException e) {
+          System.out.println("File content missing for Unique ID: " + uniqueId);
+          continue;
+        } catch (Exception e) {
+          System.out.println("Error downloading document with Unique ID: " + uniqueId);
+          e.printStackTrace();
+          continue;
+        } finally {
+          if (contentStream != null)
+            contentStream.close(); 
+        } 
+      } catch (Exception e) {
+        System.out.println("Error processing document with Unique ID: " + uniqueId);
+        e.printStackTrace();
+      } 
+    } 
+    System.out.println("Total documents downloaded: " + count);
+  }
+  
+  public static void main(String[] args) {
+    JSPLDocsDownload bulkDownload = new JSPLDocsDownload();
+    bulkDownload.getConnection();
+    if (os != null) {
+      String csvFilePath = "D:\\Projects\\UTCL\\Production\\EpaymentYearUpdate.csv";
+      String downloadPath = "D:\\JSPLDocuments\\6-5-2025";
+      File dir = new File(downloadPath);
+      if (!dir.exists())
+        dir.mkdirs(); 
+      List<String> uniqueIds = bulkDownload.readUniqueIDsFromCSV(csvFilePath);
+      bulkDownload.downloadDocuments(uniqueIds, downloadPath);
+    } else {
+      System.out.println("Object Store is null. Cannot proceed.");
+    } 
+  }
+}
